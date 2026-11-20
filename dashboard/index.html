@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Launch Radar — what each unlaunched token would be worth, and whether farming it pays</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>Launch Radar</h1>
+    <p class="sub">Protocols that record no token, ranked by implied value = value if it launches &times; launch odds. Every coefficient is fitted on this snapshot and tested held-out.</p>
+  </div>
+  <div class="snap" id="snapLine"></div>
+</header>
+
+<section class="kpis" id="kpis"></section>
+
+<section class="ledger">
+  <div class="ledgerTitle"><span id="ledgerTitle"></span><span class="ledgerHint">every protocol read, each placed for one reason</span></div>
+  <div class="ledgerBar" id="ledgerBar"></div>
+  <div class="ledgerLegend" id="ledgerLegend"></div>
+  <div class="seal" id="sealLine"></div>
+</section>
+
+<section class="evidence">
+  <h2>Out-of-sample evidence <span class="muted small">a term stays only if it wins both blind tests — leave-one-out and older&thinsp;&rarr;&thinsp;newer walk-forward</span></h2>
+  <div class="evGrid">
+    <div class="evCol">
+      <h3>Value if it launches — typical miss, <span id="evN"></span> traded tokens</h3>
+      <table class="ev" id="vablTable"><thead><tr><th>Term, added in order</th><th class="num">Left out</th><th class="num">Older&rarr;newer</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="evCol">
+      <h3>Launch odds — Brier score (share called right), <span id="evNO"></span> peers</h3>
+      <table class="ev" id="oablTable"><thead><tr><th>Term, added in order</th><th class="num">Left out</th><th class="num">Older&rarr;newer</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="evCol">
+      <h3>Is the printed range honest?</h3>
+      <table class="ev" id="holdsTable"><thead><tr><th>Share of real caps</th><th class="num">Left out</th><th class="num">Older&rarr;newer</th></tr></thead><tbody></tbody></table>
+      <p class="muted small" id="coefLine"></p>
+    </div>
+  </div>
+  <p class="evNote" id="evNote"></p>
+</section>
+
+<section class="controls">
+  <div class="chips" id="chips"></div>
+  <div class="ctlRow">
+    <select id="fCat" title="Category"></select>
+    <select id="fChain" title="Chain"></select>
+    <select id="fVerdict" title="Verdict">
+      <option value="">Any verdict</option><option value="FARM">Farm</option>
+      <option value="THIN">Thin</option><option value="SKIP">Skip</option>
+    </select>
+    <input id="fSearch" type="search" placeholder="Search protocols" autocomplete="off">
+    <button id="fReset" type="button">Reset</button>
+  </div>
+  <div class="ctlRow whatif">
+    <span class="wiLabel">What if</span>
+    <label>deposit <span class="seg" id="wDeposit"></span></label>
+    <label>to farmers <span class="seg" id="wDrop"></span></label>
+    <label>T-bill <span class="seg" id="wTbill"></span></label>
+    <span class="wiNote" id="wiNote"></span>
+    <button id="fCsv" type="button">Export CSV</button>
+  </div>
+</section>
+
+<main>
+  <div class="boardCol">
+    <div class="boardHead"><span id="boardCount"></span></div>
+    <table class="board" id="board">
+      <colgroup><col style="width:56px"><col><col style="width:64px"><col style="width:46px"><col style="width:66px"><col style="width:70px"><col style="width:44px"><col style="width:140px"><col style="width:64px"><col style="width:68px"></colgroup>
+      <thead><tr>
+        <th data-sort="rank" class="num">Rank</th>
+        <th data-sort="name">Protocol</th>
+        <th data-sort="tvl" class="num">TVL</th>
+        <th data-sort="chg" class="num">7d</th>
+        <th data-sort="age" class="num">No token</th>
+        <th data-sort="vil" class="num">If launch</th>
+        <th data-sort="odds" class="num">Odds</th>
+        <th data-sort="implied" class="num">Implied &middot; range</th>
+        <th data-sort="net" class="num">Net</th>
+        <th data-sort="verdict">Verdict</th>
+      </tr></thead>
+      <tbody id="boardBody"></tbody>
+    </table>
+    <p class="boardFoot">Click a row for its detail view: the price breakdown, the odds behind it, and the costed farm plan. Ranks are the model's claim; the page may sort how it likes.</p>
+  </div>
+
+  <aside class="side">
+    <section class="panel" id="detailPanel">
+      <h2>Detail <span id="detailName"></span></h2>
+      <div id="detailBody"><p class="muted">Click a row on the board.</p></div>
+    </section>
+    <section class="panel">
+      <h2>Comps: market cap on TVL</h2>
+      <canvas id="scatter" width="360" height="220"></canvas>
+      <p class="muted small" id="scatterNote"></p>
+    </section>
+    <section class="panel">
+      <h2>Launch odds, held out</h2>
+      <div id="oddsBody"></div>
+    </section>
+    <section class="panel">
+      <h2>Traded anchors <span class="muted small">our curve would say</span></h2>
+      <div id="anchorBody"></div>
+    </section>
+  </aside>
+</main>
+
+<footer>
+  <p>An implied value is this page's own claim about what a token would be worth if the protocol's record stayed as it is. It predicts no launch: a protocol here records no token, which is not proof it has none. Gas, drop share and carry are stated assumptions, not snapshot figures.</p>
+  <p>Known blind spot: launch odds are base rates from look-alikes, not forecasts — they do not condition on having survived tokenless this long. Old, tokenless names are where the model is most likely wrong.</p>
+</footer>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
