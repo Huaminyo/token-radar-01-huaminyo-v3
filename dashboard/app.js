@@ -30,11 +30,15 @@
   // ---- rows: decode the positional arrays, reprice from the fit --------
   // [slug, name, catIdx, chainIdx, nChains, tvlK, chg, age, flags, odds,
   //  impliedM, rankLo, rankHi, fee, hours]; flags bit0 watchlist, bit1 family.
+  function carryOf(chg) {
+    const c = chg === null ? 0 : chg;
+    return Math.max(0.75, Math.min(1.25, 1 + (c - M.fit.mchg) / 100));
+  }
   function priceRow(r) {
     const tvl = r[5] * 1000;
     const fam = (r[8] & 2) ? 1 : 0;
     const off = M.off[r[2]] || 0;
-    return Math.pow(10, M.fit.a + M.fit.b * Math.log10(tvl) + off + fam * M.fit.fam);
+    return Math.pow(10, M.fit.a + M.fit.b * Math.log10(tvl) + off + fam * M.fit.fam) * carryOf(r[6]);
   }
   const ROWS = D.rows.map((r, i) => {
     const vil = priceRow(r);
@@ -132,7 +136,7 @@
     kpi("Is the printed range honest?", M.holds.wf50 + "% &middot; " + M.holds.wf80 + "%", "of newer caps inside P25&ndash;P75 &middot; P10&ndash;P90 (stated 50% &middot; 80%)", "grn") +
     kpi("Launch odds vs base rate, Brier", M.odds.brier + " <span style='font-size:13px'>vs " + M.odds.baseBrier + "</span>", "walk-forward " + M.odds.wfBrier + " vs " + M.odds.wfBaseBrier + " &middot; " + M.odds.hit + "% called right") +
     kpi("Terms that survived both tests", keptCount(M.vabl) + " of " + (M.vabl.length - 2) + " &middot; " + keptCount(M.oabl) + " of " + (M.oabl.length - 2), "value model &middot; odds model; the rest are shown below, not used") +
-    kpi("Worth farming, this scenario", vc.FARM + " of " + n, "net beats a T-bill and $5 an hour &middot; " + vc.THIN + " thin, " + vc.SKIP + " skip", "amb") +
+    kpi("Worth farming, this scenario", vc.FARM + " of " + n, "net beats a T-bill and $5 an hour &middot; " + vc.THIN + " thin, " + vc.SKIP + " skip &middot; best " + esc(M.bestFarm.name) + " " + usdExact(M.bestFarm.netPerHour) + "/h", "amb") +
     kpi("Watchlist ranked", nWatch + " / " + M.watchTotal, "plus " + (n - nWatch) + " pre-token protocols it leaves out", "grn");
 
   // ---- ledger -------------------------------------------------------------
@@ -176,13 +180,14 @@
     '<tr><td>within &times;3 of the model</td><td class="num">' + Math.round(M.loo.w3 * 100) + '%</td><td class="num">' + Math.round(M.wf.w3 * 100) + '%</td></tr>' +
     '<tr><td>inside P25&ndash;P75, stated 50%</td><td class="num">' + M.holds.loo50 + '%</td><td class="num">' + M.holds.wf50 + '%</td></tr>' +
     '<tr><td>inside P10&ndash;P90, stated 80%</td><td class="num">' + M.holds.loo80 + '%</td><td class="num">' + M.holds.wf80 + '%</td></tr>' +
-    '<tr><td>rank correlation (Spearman)</td><td class="num">' + M.loo.rho.toFixed(2) + '</td><td class="num">' + M.wf.rho.toFixed(2) + '</td></tr>';
+    '<tr><td>rank correlation (Spearman)</td><td class="num">' + M.loo.rho.toFixed(2) + '</td><td class="num">' + M.wf.rho.toFixed(2) + '</td></tr>' +
+    '<tr><td>top 20 still top 20 in &ge;80% of 200 refits</td><td class="num" colspan="2">' + M.top20.hold + " of " + M.top20.of + "</td></tr>";
   $("coefLine").innerHTML = "Fitted, &plusmn; bootstrap s.e. (200 refits): size &times;" + M.fit.b.toFixed(3) + " &plusmn; " + M.fit.se.b.toFixed(3) +
     "; family +" + M.fit.fam.toFixed(2) + " &plusmn; " + M.fit.se.fam.toFixed(2) + " in log10 (&times;" + Math.pow(10, M.fit.fam).toFixed(2) + "). " +
     "Odds, in logits: years listed +" + M.oddsFit.beta[1].toFixed(2) + " &plusmn; " + M.oddsFit.se[1].toFixed(2) +
     ", kin +" + M.oddsFit.beta[2].toFixed(2) + " &plusmn; " + M.oddsFit.se[2].toFixed(2) +
     ". Category rate tested, not kept (see the ablation).";
-  $("evNote").textContent = "Reading it: 7-day growth and age fail to price a token better, so the value model leaves them out; kinship — a sibling protocol that already records a token — is the strongest tell of which peers record one, so it enters through the odds. The category rate wins both blind tests by a hair but is not kept: it prices the newest categories at near-zero odds from their youth, not from evidence. The odds are the peers' record, not a forecast: the page never says a token will launch.";
+  $("evNote").textContent = "Reading it: a fixed 7-day carry — one more week of the move beyond the market's, clipped to ±25% — survives both tests and is kept, while a fitted growth coefficient on the same move is negative and is not used; age and chain count fail too. Kinship — a sibling protocol that already records a token — is the strongest tell of which peers record one, so it enters through the odds. The category rate wins both blind tests by a hair but is not kept: it prices the newest categories at near-zero odds from their youth, not from evidence. The odds are the peers' record, not a forecast: the page never says a token will launch.";
 
   // ---- controls -----------------------------------------------------------
   let chipVerdict = "", sortKey = "rank", sortDir = 1, selected = null;
@@ -272,7 +277,7 @@
         '<td class="num">' + usdShort(r.vil) + "</td>" +
         '<td class="num">' + pct(r.odds) + "</td>" +
         '<td class="num"><b>' + usdShort(r.implied) + '</b><br><span class="rng">' + usdShort(r.lo) + "–" + usdShort(r.hi) + "</span></td>" +
-        '<td class="num">' + usdExact(r.econ.net) + '</td><td class="v' + r.econ.verdict + '">' + r.econ.verdict + "</td></tr>";
+        '<td class="num">' + usdExact(r.econ.net) + '<br><span class="rng">' + usdExact(r.fee) + " fees · " + r.hours + 'h</span></td><td class="v' + r.econ.verdict + '">' + r.econ.verdict + "</td></tr>";
     }).join("");
     $("boardBody").querySelectorAll("tr").forEach((tr) => tr.addEventListener("click", () => { selected = tr.dataset.slug; renderBoard(); renderDetail(selected); }));
   }
@@ -295,6 +300,7 @@
       kv("Size curve", "10^" + M.fit.a.toFixed(2) + " × TVL^" + M.fit.b.toFixed(3) + " = " + usdShort(Math.pow(10, M.fit.a + M.fit.b * Math.log10(r.tvl)))) +
       (r.fam ? kv("Family effect", "&times;" + Math.pow(10, M.fit.fam).toFixed(2)) : "") +
       kv("Category offset", "&times;" + Math.pow(10, M.off[r.catIdx] || 0).toFixed(2)) +
+      kv("7-day carry", "&times;" + carryOf(r.chg).toFixed(2) + " <span class='muted'>(one more week beyond the market median, clipped to ±25%)</span>") +
       kv("Value if it launches", "<b>" + usdShort(r.vil) + "</b>") +
       kv("Launch odds", "<b>" + pct(r.odds) + "</b> <span class='muted'>(" + b[0].toFixed(2) + " + years " + (zYrs >= 0 ? "+" : "") + zYrs.toFixed(2) + " in logits; kin 0 — kin protocols are set aside)</span>") +
       kv("Implied value", "<b>" + usdShort(r.implied) + "</b> <span class='muted'>P25–P75 " + usdShort(r.lo) + "–" + usdShort(r.hi) + " · rank " + r.rankLo + "–" + r.rankHi + "</span>") +

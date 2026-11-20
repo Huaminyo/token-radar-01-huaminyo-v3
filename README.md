@@ -25,11 +25,21 @@ implied value = value-if-launched × P(records a token)
 
 Value-if-launched is a Huber log-log size curve fitted on all 127
 one-per-ticker traded comps — no comps dropped — with ridge-shrunk category
-offsets and a family effect for protocols that share a name stem:
+offsets, a family effect for protocols that share a name stem, and a fixed
+7-day carry (one more week of the move beyond the market median, clipped to
+±25%; a fitted growth coefficient on the same move is negative and is not
+used):
 
 ```
 log10 value = 3.39 + 0.47 × log10(TVL) + category offset + 0.58 × family
+value-if-launched = 10^log10 value × carry
 ```
+
+Held out, the value model misses by ×3.08 leave-one-out and ×2.72
+walk-forward (a flat TVL multiple: ×4.88 and ×5.29). The carry wins both
+tests on the median miss (×3.0791 / ×2.7151, against ×3.1441 / ×2.7246
+without it); 9 of the top 20 rows still rank top 20 in at least 80% of 200
+bootstrap refits.
 
 Launch odds are a logistic fit on years listed and kinship (a sibling protocol
 already records a token). The category's token rate was tested and wins both

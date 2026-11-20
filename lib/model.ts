@@ -2,10 +2,14 @@
 //
 // One line: implied value = value-if-launched x P(records a token).
 //   value-if-launched: a Huber log-log size curve fitted on every
-//     one-per-ticker traded comp (127), with ridge-shrunk category offsets
-//     and a family effect for protocols that share a name stem.
-//   P(records a token): a logistic fit on years listed, kinship (a sibling
-//     protocol already records a token) and the category's token rate.
+//     one-per-ticker traded comp (127), with ridge-shrunk category offsets,
+//     a family effect for protocols that share a name stem, and a fixed
+//     7-day carry: one more week of the move beyond the market median,
+//     clipped to +/-25% (a fitted growth coefficient is negative and is
+//     not used — only the fixed carry survives both blind tests).
+//   P(records a token): a logistic fit on years listed and kinship (a
+//     sibling protocol already records a token). The category rate is
+//     tested, not kept: it is confounded by category age.
 // A term enters either fit only if it lowers the held-out miss (value) or
 // the Brier score (odds) in BOTH blind tests: leave-one-out and
 // older -> newer walk-forward. Everything else is shown as tried-and-dropped.
@@ -289,7 +293,7 @@ export function pickComps(protos: Proto[], groups: Map<string, Proto[]>): Comp[]
 
 // ------------------------------------------------------------------ value fit
 
-/** Which terms a value fit carries. The final model is size + cat + fam. */
+/** Which terms a value fit carries. The final model is size + cat + fam + carry. */
 export interface ValueSpec {
   cat: boolean;
   fam: boolean;
@@ -298,9 +302,10 @@ export interface ValueSpec {
   age: boolean; // fitted log-age term (ablation only)
   nch: boolean; // chain-count term (ablation only)
   shuf: boolean; // shuffled family flags (negative control)
+  carry: boolean; // fixed 7-day carry: 1 + (7d change - market median), clipped to +/-25%
 }
 
-export const FINAL_VALUE: ValueSpec = { cat: true, fam: true, kin: false, mom: false, age: false, nch: false, shuf: false };
+export const FINAL_VALUE: ValueSpec = { cat: true, fam: true, kin: false, mom: false, age: false, nch: false, shuf: false, carry: true };
 export const CAT_RIDGE = 6;
 
 /** A fitted value model, with everything the page needs to reprice a row. */
@@ -394,6 +399,11 @@ export function fitValue(train: Comp[], asOf: string, spec: ValueSpec, shufMap?:
     if (spec.age && age !== null) v += ageCoef * (Math.log10(age + 30) - meanLogAge);
     if (spec.nch) v += nchCoef * Math.log10(Math.max(1, nChains));
     if (spec.shuf) v += shufCoef * shufFlag;
+    // Fixed 7-day carry, applied after the fit: one more week of the move
+    // beyond the market median of the fit set, clipped to +/-25%. The
+    // market median is the fit set's own, so each blind fold carries with
+    // the median its training half saw — no leakage from the held-out row.
+    if (spec.carry) v += Math.log10(Math.max(0.75, Math.min(1.25, 1 + (chg - mchg) / 100)));
     return 10 ** v;
   };
   return {
@@ -526,10 +536,11 @@ export interface AblationRow {
  * and the shuffled control are shown, not hidden.
  */
 export function valueAblation(comps: Comp[], asOf: string): AblationRow[] {
-  const none: ValueSpec = { cat: false, fam: false, kin: false, mom: false, age: false, nch: false, shuf: false };
+  const none: ValueSpec = { cat: false, fam: false, kin: false, mom: false, age: false, nch: false, shuf: false, carry: false };
   const flat = checkFlat(comps);
   const size = checkValue(comps, asOf, none);
   const fam = checkValue(comps, asOf, { ...none, fam: true });
+  const cat = checkValue(comps, asOf, { ...FINAL_VALUE, carry: false });
   const final = checkValue(comps, asOf, FINAL_VALUE);
   const mom = checkValue(comps, asOf, { ...FINAL_VALUE, mom: true });
   const age = checkValue(comps, asOf, { ...FINAL_VALUE, age: true });
@@ -539,10 +550,11 @@ export function valueAblation(comps: Comp[], asOf: string): AblationRow[] {
     { label: "flat TVL multiple", kept: false, note: "baseline: one median mcap/TVL for all", loo: flat.loo, wf: flat.wf },
     { label: "size curve (Huber)", kept: true, note: "log-log fit on all 127 comps, no comps dropped", loo: size.loo, wf: size.wf },
     { label: "+ family effect", kept: true, note: "protocols sharing a name stem price higher per TVL", loo: fam.loo, wf: fam.wf },
-    { label: "+ category offsets (final)", kept: true, note: "ridge-shrunk, categories with 3+ comps", loo: final.loo, wf: final.wf },
-    { label: "+ 7-day growth (dropped)", kept: false, note: "fitted coefficient is negative; wins neither test", loo: mom.loo, wf: mom.wf },
+    { label: "+ category offsets", kept: true, note: "ridge-shrunk, categories with 3+ comps", loo: cat.loo, wf: cat.wf },
+    { label: "+ 7-day carry (final)", kept: true, note: "fixed 1 + (7d change - market median), clipped to +/-25%; wins both tests", loo: final.loo, wf: final.wf },
+    { label: "+ fitted 7-day growth (dropped)", kept: false, note: "a fitted log-coefficient on the same move; the coefficient is negative and wins neither test", loo: mom.loo, wf: mom.wf },
     { label: "+ listing age (dropped)", kept: false, note: "no LOO gain, walk-forward worse", loo: age.loo, wf: age.wf },
-    { label: "+ chain count (dropped)", kept: false, note: "no gain in either test", loo: nch.loo, wf: nch.wf },
+    { label: "+ chain count (dropped)", kept: false, note: "wins the walk-forward by a hair (x2.712 vs x2.715) but loses leave-one-out (x3.128 vs x3.079); a term must win both", loo: nch.loo, wf: nch.wf },
     { label: "shuffled family flags (control)", kept: false, note: "family flags shuffled: the signal is destroyed, the miss returns toward the size-only level", loo: shuf.loo, wf: shuf.wf },
   ];
 }
@@ -810,6 +822,7 @@ export function ageBandRates(dated: Proto[], asOf: string): { label: string; n: 
 
 export interface BootstrapOut {
   rankRange: Map<string, [number, number]>;
+  top20Share: Map<string, number>; // share of refits in which the row still ranks top 20
   slopeSe: number;
   interceptSe: number;
   famSe: number;
@@ -819,7 +832,8 @@ export interface BootstrapOut {
 /**
  * 200 bootstrap refits (seed 20261114): resample the comps, refit the value
  * model, reprice every board row, record each row's rank; the P10–P90 of the
- * 200 ranks is the printed rank range, and the spread of the refitted
+ * 200 ranks is the printed rank range, the share of refits a row still ranks
+ * top 20 is its top-20 stability, and the spread of the refitted
  * coefficients is their standard error. The odds fit is refitted on
  * resampled dated protocols for its own coefficient errors.
  */
@@ -834,7 +848,11 @@ export function bootstrapAll(
 ): BootstrapOut {
   const rng = mulberry32(seed);
   const ranks = new Map<string, number[]>();
-  for (const r of rows) ranks.set(r.slug, []);
+  const top20 = new Map<string, number>();
+  for (const r of rows) {
+    ranks.set(r.slug, []);
+    top20.set(r.slug, 0);
+  }
   const slopes: number[] = [];
   const ints: number[] = [];
   const famCs: number[] = [];
@@ -848,12 +866,17 @@ export function bootstrapAll(
     const priced = rows
       .map((r) => ({ slug: r.slug, v: fit.predict(r.tvl, r.chg, r.cat, r.fam, 0, r.age, r.nChains, 0) * r.odds }))
       .sort((a, b) => b.v - a.v);
-    priced.forEach((p, i) => ranks.get(p.slug)?.push(i + 1));
+    priced.forEach((p, i) => {
+      ranks.get(p.slug)?.push(i + 1);
+      if (i < 20) top20.set(p.slug, (top20.get(p.slug) ?? 0) + 1);
+    });
   }
   const rankRange = new Map<string, [number, number]>();
+  const top20Share = new Map<string, number>();
   for (const [slug, rs] of ranks) {
     const s = [...rs].sort((a, b) => a - b);
     rankRange.set(slug, [quantileSorted(s, 0.1), quantileSorted(s, 0.9)]);
+    top20Share.set(slug, (top20.get(slug) ?? 0) / refits);
   }
   const oddsBetas: number[][] = [];
   for (let k = 0; k < refits; k++) {
@@ -862,7 +885,7 @@ export function bootstrapAll(
     oddsBetas.push(fitOdds(sample, asOf, FINAL_ODDS, groups).beta);
   }
   const oddsSe = oddsBetas[0]!.map((_, j) => stdev(oddsBetas.map((b) => b[j]!)));
-  return { rankRange, slopeSe: stdev(slopes), interceptSe: stdev(ints), famSe: stdev(famCs), oddsSe };
+  return { rankRange, top20Share, slopeSe: stdev(slopes), interceptSe: stdev(ints), famSe: stdev(famCs), oddsSe };
 }
 
 // ------------------------------------------------------------------ farm economics

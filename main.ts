@@ -220,6 +220,9 @@ async function main(): Promise<void> {
     THIN: rows.filter((r) => r.verdict === "THIN").length,
     SKIP: rows.filter((r) => r.verdict === "SKIP").length,
   };
+  // Top-20 stability: how many of the board's top 20 still rank top 20 in
+  // at least 80% of the 200 bootstrap refits.
+  const top20Hold = rows.slice(0, 20).filter((r) => (boot.top20Share.get(r.slug) ?? 0) >= 0.8).length;
   const bestFarm = [...rows].sort((a, b) => b.netPerHour - a.netPerHour)[0]!;
   const led = ledgerOf(protos, groups);
   const anch = anchorRows(comps, valueFit, asOf);
@@ -266,6 +269,7 @@ async function main(): Promise<void> {
       ledger: led,
       totalImpliedUsd: Math.round(totalImplied),
       verdictCounts,
+      top20Hold: { hold: top20Hold, of: 20, threshold: 0.8, refits: 200 },
       farmDefaults: fp,
       seal: rowSeal,
     },
@@ -309,10 +313,11 @@ async function main(): Promise<void> {
   // Row arrays, positional: [slug, name, catIdx, chainIdx, nChains, tvlK,
   // chg, age, flags, odds, impliedM, rankLo, rankHi, fee, hours]
   // flags: bit 0 = watchlist, bit 1 = shares a name stem (family).
-  // tvlK is whole $K; impliedM carries 3 decimals. The page derives
-  // value-if-launched (from the fitted coefficients), ranges (implied x/div
-  // f50/f80), farm economics and verdicts from these + meta, with the same
-  // formulas as lib/model.ts.
+  // tvlK is whole $K; impliedM carries 3 decimals; chg is carried at full
+  // snapshot precision because the page's 7-day carry depends on it. The
+  // page derives value-if-launched (from the fitted coefficients + the
+  // fixed 7-day carry), ranges (implied x/div f50/f80), farm economics and
+  // verdicts from these + meta, with the same formulas as lib/model.ts.
   const cats = [...new Set(rows.map((r) => r.category))].sort();
   const catIdx = new Map(cats.map((c, i) => [c, i]));
   const chains = [...new Set(rows.flatMap((r) => r.chains))].sort();
@@ -328,9 +333,10 @@ async function main(): Promise<void> {
         a: +valueFit.intercept.toFixed(4),
         b: +valueFit.slope.toFixed(4),
         fam: +valueFit.famCoef.toFixed(4),
-        mchg: +valueFit.marketChg.toFixed(2),
+        mchg: +valueFit.marketChg.toFixed(4),
         se: { b: +boot.slopeSe.toFixed(3), a: +boot.interceptSe.toFixed(3), fam: +boot.famSe.toFixed(3) },
       },
+      top20: { hold: top20Hold, of: 20 },
       oddsFit: {
         beta: oddsFit.beta.map((v) => +v.toFixed(3)),
         se: boot.oddsSe.map((v) => +v.toFixed(3)),
@@ -381,7 +387,7 @@ async function main(): Promise<void> {
       chainIdx.get(r.chains[0] ?? "") ?? -1,
       r.chains.length,
       Math.round(r.tvl / 1000),
-      r.chg === null ? null : +r.chg.toFixed(1),
+      r.chg,
       r.age,
       (r.watch ? 1 : 0) + (r.fam === 1 ? 2 : 0),
       round3(r.odds),
@@ -410,8 +416,9 @@ async function main(): Promise<void> {
   // ---- summary ---------------------------------------------------------------
   console.log(`snapshot ${asOf} — ${protos.length} protocols, ${watch.size} watchlist`);
   console.log(`comps: ${comps.length} one-per-ticker, none dropped`);
-  console.log(`value: log10 value = ${valueFit.intercept.toFixed(3)} + ${valueFit.slope.toFixed(3)} x log10(TVL) + fam ${valueFit.famCoef.toFixed(3)} + cat offsets`);
-  console.log(`LOO x${vFinal.loo.med.toFixed(2)} (flat x${vFlat.loo.med.toFixed(2)}) | WF x${vFinal.wf.med.toFixed(2)} (flat x${vFlat.wf.med.toFixed(2)}) | rho LOO ${vFinal.loo.rho.toFixed(2)} WF ${vFinal.wf.rho.toFixed(2)}`);
+  console.log(`value: log10 value = ${valueFit.intercept.toFixed(3)} + ${valueFit.slope.toFixed(3)} x log10(TVL) + fam ${valueFit.famCoef.toFixed(3)} + cat offsets + 7d carry (market ${valueFit.marketChg.toFixed(2)}%, clip +-25%)`);
+  console.log(`LOO x${vFinal.loo.med.toFixed(2)} (flat x${vFlat.loo.med.toFixed(2)}) | WF x${vFinal.wf.med.toFixed(2)} (flat x${vFlat.wf.med.toFixed(2)}) | rho LOO ${vFinal.loo.rho.toFixed(2)} WF ${vFinal.wf.rho.toFixed(2)} | top-20 hold ${top20Hold}/20`);
+  console.log(`value ablation: ${vAbl.map((r) => `${r.label}=x${r.loo.med.toFixed(2)}/x${r.wf.med.toFixed(2)}${r.kept ? " K" : ""}`).join(" | ")}`);
   console.log(`range holds: LOO ${Math.round(holds.loo50 * 100)}%/${Math.round(holds.loo80 * 100)}% WF ${Math.round(holds.wf50 * 100)}%/${Math.round(holds.wf80 * 100)}% (f50 x${holds.f50}, f80 x${holds.f80})`);
   console.log(`odds: beta [${oddsFit.beta.map((b) => b.toFixed(2)).join(" ")}] | LOO hit ${Math.round(oFinal.loo.hit * 100)}% Brier ${oFinal.loo.brier.toFixed(3)} (base ${oFinal.baseLoo.brier.toFixed(3)}) | WF hit ${Math.round(oFinal.wf.hit * 100)}% Brier ${oFinal.wf.brier.toFixed(3)} (base ${oFinal.baseWf.brier.toFixed(3)})`);
   console.log(`board: ${rows.length} rows, total implied $${(totalImplied / 1e9).toFixed(2)}B, #1 ${rows[0]!.name} $${(rows[0]!.implied / 1e6).toFixed(1)}M`);
